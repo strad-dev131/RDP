@@ -1,13 +1,10 @@
 name: RDP
-
 on:
   workflow_dispatch:
-
 jobs:
   secure-rdp:
     runs-on: windows-latest
     timeout-minutes: 3600
-
     steps:
       - name: Configure Core RDP Settings
         run: |
@@ -18,17 +15,14 @@ jobs:
                              -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
                              -Name "SecurityLayer" -Value 0 -Force
-
           # Remove any existing rule with the same name to avoid duplication
           netsh advfirewall firewall delete rule name="RDP-Tailscale"
           
           # For testing, allow any incoming connection on port 3389
           netsh advfirewall firewall add rule name="RDP-Tailscale" `
             dir=in action=allow protocol=TCP localport=3389
-
           # (Optional) Restart the Remote Desktop service to ensure changes take effect
           Restart-Service -Name TermService -Force
-
       - name: Create RDP User with Secure Password
         run: |
           Add-Type -AssemblyName System.Security
@@ -56,16 +50,29 @@ jobs:
               Write-Error "User creation failed"
               exit 1
           }
-
+      # FIXED: Install Tailscale step with corrected Start-Process syntax
       - name: Install Tailscale
         run: |
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
           
+          Write-Host "Downloading Tailscale MSI..."
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", ""$installerPath"", "/quiet", "/norestart" -Wait
+          
+          Write-Host "Installing Tailscale..."
+          # FIXED: Changed ""$installerPath"" to "`"$installerPath`"" to fix the System.Object[] error
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait -NoNewWindow
+          
+          Write-Host "Cleaning up installer..."
           Remove-Item $installerPath -Force
-
+          
+          # Verify installation
+          if (Test-Path "$env:ProgramFiles\Tailscale\tailscale.exe") {
+              Write-Host "Tailscale installation successful"
+          } else {
+              Write-Error "Tailscale installation failed"
+              exit 1
+          }
       - name: Establish Tailscale Connection
         run: |
           # Bring up Tailscale with the provided auth key and set a unique hostname
@@ -97,7 +104,6 @@ jobs:
               exit 1
           }
           Write-Host "TCP connectivity successful!"
-
       - name: Maintain Connection
         run: |
           Write-Host "`n=== RDP ACCESS ==="
